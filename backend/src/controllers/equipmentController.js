@@ -65,8 +65,11 @@ export const updateEquipment = asyncHandler(async (req, res) => {
     values.push(description);
   }
   if (status !== undefined) {
-    if (!['available', 'in_use', 'maintenance'].includes(status)) {
-      throw httpError(400, 'status must be available, in_use, or maintenance');
+    if (status === 'maintenance') {
+      throw httpError(409, 'Use the maintenance workflow to record an outage and reschedule affected bookings');
+    }
+    if (!['available', 'in_use'].includes(status)) {
+      throw httpError(400, 'status must be available or in_use');
     }
     updates.push('status = ?');
     values.push(status);

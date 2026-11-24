@@ -40,4 +40,7 @@ a{text-decoration:none}
 .form-shell{max-width:760px;margin:0 auto;padding:32px}
 .filter-select{width:auto;min-width:150px}
 .empty-state{color:#526176}
+.admin-action-card{height:100%;display:flex;align-items:center;gap:14px;padding:22px;background:#fff;border:1px solid #e8edf4;border-radius:18px;color:#17243a;box-shadow:0 8px 28px rgba(28,53,87,.045);transition:transform .2s,box-shadow .2s}
+.admin-action-card:hover{transform:translateY(-2px);box-shadow:0 14px 32px rgba(28,53,87,.09)}
+.admin-action-icon{width:46px;height:46px;display:grid;place-items:center;flex-shrink:0;border-radius:14px;background:#edf4ff;color:#1769d2;font-size:1.25rem}
 @media(max-width:767px){.hero h1{font-size:2.5rem}.hero-card{padding:20px}.section-card{padding:16px}.form-shell{padding:22px}.page-wrap{padding-top:30px}}

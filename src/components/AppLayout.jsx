@@ -14,10 +14,18 @@ export default function AppLayout() {
           <div className="collapse navbar-collapse" id="mainNav">
             <div className="navbar-nav ms-auto align-items-lg-center gap-lg-2">
               {user ? <>
-                <NavLink className="nav-link" to="/dashboard">Dashboard</NavLink>
-                <NavLink className="nav-link" to="/equipment">Equipment</NavLink>
-                <NavLink className="nav-link" to="/book">New Booking</NavLink>
-                <NavLink className="nav-link" to="/my-bookings">My Bookings</NavLink>
+                {user.role === "admin" ? <>
+                  <NavLink className="nav-link" to="/admin">Admin</NavLink>
+                  <NavLink className="nav-link" to="/admin/requests">Requests</NavLink>
+                  <NavLink className="nav-link" to="/admin/schedule">Schedule</NavLink>
+                  <NavLink className="nav-link" to="/admin/equipment">Equipment</NavLink>
+                  <NavLink className="nav-link" to="/admin/maintenance">Maintenance</NavLink>
+                </> : <>
+                  <NavLink className="nav-link" to="/dashboard">Dashboard</NavLink>
+                  <NavLink className="nav-link" to="/equipment">Equipment</NavLink>
+                  <NavLink className="nav-link" to="/book">New Booking</NavLink>
+                  <NavLink className="nav-link" to="/my-bookings">My Bookings</NavLink>
+                </>}
                 <span className="small text-secondary ms-lg-2">Hi, {user.name}</span>
                 <button className="btn btn-outline-secondary btn-sm ms-lg-2" onClick={handleLogout}>Log out</button>
               </> : <>

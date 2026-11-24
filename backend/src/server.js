@@ -8,6 +8,7 @@ import authRoutes from './routes/authRoutes.js';
 import bookingRoutes from './routes/bookingRoutes.js';
 import equipmentRoutes from './routes/equipmentRoutes.js';
 import notificationRoutes from './routes/notificationRoutes.js';
+import maintenanceRoutes from './routes/maintenanceRoutes.js';
 
 const app = express();
 const port = Number(process.env.PORT || 5000);
@@ -30,6 +31,7 @@ app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
 app.use('/api/auth', authRoutes);
 app.use('/api/equipment', equipmentRoutes);
 app.use('/api/bookings', bookingRoutes);
+app.use('/api/maintenance', maintenanceRoutes);
 app.use('/api/notifications', notificationRoutes);
 
 app.use((req, res, next) => next(httpError(404, 'Route not found')));

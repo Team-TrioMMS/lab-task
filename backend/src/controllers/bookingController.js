@@ -7,10 +7,11 @@ import {
   parseUrgency,
   positiveId,
 } from '../utils/validation.js';
+import { generateSchedule } from '../utils/scheduler.js';
 
 const bookingSelect = `
   SELECT b.id, b.user_id, u.name AS user_name, b.equipment_id, e.name AS equipment_name,
-         b.booking_date, b.start_time, b.duration_minutes, b.deadline, b.urgency, b.status,
+         b.booking_date, b.start_time, b.duration_minutes, b.deadline, b.urgency, b.purpose, b.status,
          b.created_at, s.starts_at AS scheduled_start, s.ends_at AS scheduled_end
   FROM booking_requests b
   JOIN users u ON u.id = b.user_id
@@ -62,13 +63,17 @@ async function ensureSlotAvailable(connection, equipmentId, startAt, durationMin
 
 export const createBooking = asyncHandler(async (req, res) => {
   const equipmentId = positiveId(req.body?.equipmentId, 'equipmentId');
-  const bookingDate = parseDate(req.body?.bookingDate, 'bookingDate');
+  const bookingDate = parseDate(req.body?.bookingDate ?? req.body?.date, 'bookingDate');
   const startTime = parseTime(req.body?.startTime, 'startTime');
   const durationMinutes = parseDuration(req.body?.durationMinutes);
   const deadline = req.body?.deadline == null || req.body.deadline === ''
     ? null
     : parseDate(req.body.deadline, 'deadline');
   const urgency = parseUrgency(req.body?.urgency);
+  const purpose = req.body?.purpose == null ? null : String(req.body.purpose).trim();
+  if (purpose && purpose.length > 500) {
+    throw httpError(400, 'purpose must be at most 500 characters');
+  }
   if (deadline && deadline < bookingDate) {
     throw httpError(400, 'deadline cannot be before bookingDate');
   }
@@ -80,9 +85,9 @@ export const createBooking = asyncHandler(async (req, res) => {
     await ensureSlotAvailable(connection, equipmentId, startAt, durationMinutes);
     const [result] = await connection.execute(
       `INSERT INTO booking_requests
-       (user_id, equipment_id, booking_date, start_time, duration_minutes, deadline, urgency)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [req.auth.sub, equipmentId, bookingDate, `${startTime}:00`, durationMinutes, deadline, urgency],
+       (user_id, equipment_id, booking_date, start_time, duration_minutes, deadline, urgency, purpose)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [req.auth.sub, equipmentId, bookingDate, `${startTime}:00`, durationMinutes, deadline, urgency, purpose],
     );
     await connection.commit();
     return res.status(201).json({
@@ -94,6 +99,7 @@ export const createBooking = asyncHandler(async (req, res) => {
         durationMinutes,
         deadline,
         urgency,
+        purpose,
         status: 'pending',
       },
     });
@@ -156,6 +162,10 @@ export const updateBookingStatus = asyncHandler(async (req, res) => {
     }
 
     let startAt;
+    let equipmentId = booking.equipment_id;
+    if (req.body?.scheduledEquipmentId !== undefined) {
+      equipmentId = positiveId(req.body.scheduledEquipmentId, 'scheduledEquipmentId');
+    }
     if (status === 'rescheduled' || req.body?.scheduledDate !== undefined || req.body?.scheduledStartTime !== undefined) {
       if (!req.body?.scheduledDate || !req.body?.scheduledStartTime) {
         throw httpError(400, 'scheduledDate and scheduledStartTime must be provided together');
@@ -168,15 +178,18 @@ export const updateBookingStatus = asyncHandler(async (req, res) => {
     }
 
     if (status === 'approved' || status === 'rescheduled') {
-      await ensureSlotAvailable(connection, booking.equipment_id, startAt, booking.duration_minutes, id);
+      await ensureSlotAvailable(connection, equipmentId, startAt, booking.duration_minutes, id);
       await connection.execute(
         `INSERT INTO schedules (booking_id, equipment_id, starts_at, ends_at)
          VALUES (?, ?, ?, TIMESTAMPADD(MINUTE, ?, ?))
          ON DUPLICATE KEY UPDATE equipment_id = VALUES(equipment_id),
                                  starts_at = VALUES(starts_at),
                                  ends_at = VALUES(ends_at)`,
-        [id, booking.equipment_id, startAt, booking.duration_minutes, startAt],
+        [id, equipmentId, startAt, booking.duration_minutes, startAt],
       );
+      if (equipmentId !== booking.equipment_id) {
+        await connection.execute('UPDATE booking_requests SET equipment_id = ? WHERE id = ?', [equipmentId, id]);
+      }
     } else {
       await connection.execute('DELETE FROM schedules WHERE booking_id = ?', [id]);
     }
@@ -193,6 +206,95 @@ export const updateBookingStatus = asyncHandler(async (req, res) => {
     );
     await connection.commit();
     return res.json({ bookingId: id, status, scheduledStart: startAt });
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
+  }
+});
+
+export const generateBookingsSchedule = asyncHandler(async (req, res) => {
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+    const [requests] = await connection.execute(
+      `SELECT b.id, b.user_id, b.equipment_id, b.booking_date, b.start_time,
+              b.duration_minutes, b.deadline, b.urgency, b.created_at
+       FROM booking_requests b
+      WHERE b.status IN ('pending', 'rescheduled')
+        AND NOT EXISTS (SELECT 1 FROM schedules s WHERE s.booking_id = b.id)
+       ORDER BY b.created_at
+       FOR UPDATE`,
+    );
+    if (requests.length === 0) {
+      await connection.commit();
+      return res.json({ scheduled: [], unscheduled: [] });
+    }
+
+    const equipmentIds = [...new Set(requests.map((request) => request.equipment_id))];
+    const [equipmentRows] = await connection.execute(
+      `SELECT id, status FROM equipment
+       WHERE id IN (${equipmentIds.map(() => '?').join(',')})
+       ORDER BY id FOR UPDATE`,
+      equipmentIds,
+    );
+    const unavailableEquipment = new Set(
+      equipmentRows.filter((equipment) => equipment.status === 'maintenance').map((equipment) => equipment.id),
+    );
+    const readyRequests = requests.filter((request) => !unavailableEquipment.has(request.equipment_id));
+    const [existingSchedules] = await connection.execute(
+      `SELECT s.equipment_id,
+              DATE_FORMAT(s.starts_at, '%Y-%m-%d %H:%i:%s') AS starts_at,
+              DATE_FORMAT(s.ends_at, '%Y-%m-%d %H:%i:%s') AS ends_at,
+              b.user_id
+       FROM schedules s JOIN booking_requests b ON b.id = s.booking_id
+       WHERE s.ends_at >= CURRENT_TIMESTAMP`,
+    );
+    const [maintenance] = await connection.execute(
+      `SELECT equipment_id,
+              DATE_FORMAT(start_date, '%Y-%m-%d %H:%i:%s') AS start_date,
+              DATE_FORMAT(end_date, '%Y-%m-%d %H:%i:%s') AS end_date
+       FROM maintenance WHERE status = 'active'`,
+    );
+    const result = generateSchedule({
+      requests: readyRequests,
+      existingSchedules,
+      maintenance,
+    });
+    for (const item of result.scheduled) {
+      await connection.execute(
+        `INSERT INTO schedules (booking_id, equipment_id, starts_at, ends_at)
+         VALUES (?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE equipment_id = VALUES(equipment_id),
+                                 starts_at = VALUES(starts_at),
+                                 ends_at = VALUES(ends_at)`,
+        [item.request.id, item.request.equipment_id, item.startsAt, item.endsAt],
+      );
+      await connection.execute(
+        "UPDATE booking_requests SET status = 'approved' WHERE id = ?",
+        [item.request.id],
+      );
+      await connection.execute(
+        'INSERT INTO notifications (user_id, message) VALUES (?, ?)',
+        [item.request.user_id, `Your booking has been scheduled for ${item.startsAt}.`],
+      );
+    }
+    const unscheduled = [
+      ...result.unscheduled,
+      ...requests
+        .filter((request) => unavailableEquipment.has(request.equipment_id))
+        .map((request) => ({ request, reason: 'Equipment is under maintenance.' })),
+    ];
+    await connection.commit();
+    return res.json({
+      scheduled: result.scheduled.map(({ request, startsAt, endsAt }) => ({
+        bookingId: request.id,
+        startsAt,
+        endsAt,
+      })),
+      unscheduled: unscheduled.map(({ request, reason }) => ({ bookingId: request.id, reason })),
+    });
   } catch (error) {
     await connection.rollback();
     throw error;

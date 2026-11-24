@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS booking_requests (
     duration_minutes SMALLINT UNSIGNED NOT NULL,
     deadline DATE,
     urgency ENUM('low', 'medium', 'high') NOT NULL DEFAULT 'low',
+    purpose VARCHAR(500),
     status ENUM('pending', 'approved', 'rejected', 'rescheduled', 'cancelled')
         NOT NULL DEFAULT 'pending',
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,

@@ -36,7 +36,8 @@ export function parseDuration(value) {
 }
 
 export function parseUrgency(value) {
-  const urgency = value ?? 'low';
+  const normalized = typeof value === 'string' ? value.trim().toLowerCase() : value;
+  const urgency = normalized === 'normal' ? 'medium' : normalized === 'critical' ? 'high' : normalized ?? 'low';
   if (!['low', 'medium', 'high'].includes(urgency)) {
     throw httpError(400, 'urgency must be low, medium, or high');
   }

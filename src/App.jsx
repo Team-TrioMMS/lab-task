@@ -8,10 +8,18 @@ import StudentDashboard from "./pages/StudentDashboard.jsx";
 import Equipment from "./pages/Equipment.jsx";
 import BookingForm from "./pages/BookingForm.jsx";
 import MyBookings from "./pages/MyBookings.jsx";
+import AdminDashboard from "./pages/AdminDashboard.jsx";
+import AllRequests from "./pages/AllRequests.jsx";
+import ScheduleCalendar from "./pages/ScheduleCalendar.jsx";
+import EquipmentManagement from "./pages/EquipmentManagement.jsx";
+import Maintenance from "./pages/Maintenance.jsx";
+import ManageSchedule from "./pages/ManageSchedule.jsx";
 
-function ProtectedRoute({ children }) {
+function ProtectedRoute({ children, role }) {
   const { user } = useAuth();
-  return user ? children : <Navigate to="/login" replace />;
+  if (!user) return <Navigate to="/login" replace />;
+  if (role && user.role !== role) return <Navigate to="/dashboard" replace />;
+  return children;
 }
 
 export default function App() {
@@ -26,6 +34,12 @@ export default function App() {
           <Route path="/equipment" element={<ProtectedRoute><Equipment /></ProtectedRoute>} />
           <Route path="/book" element={<ProtectedRoute><BookingForm /></ProtectedRoute>} />
           <Route path="/my-bookings" element={<ProtectedRoute><MyBookings /></ProtectedRoute>} />
+          <Route path="/admin" element={<ProtectedRoute role="admin"><AdminDashboard /></ProtectedRoute>} />
+          <Route path="/admin/requests" element={<ProtectedRoute role="admin"><AllRequests /></ProtectedRoute>} />
+          <Route path="/admin/schedule" element={<ProtectedRoute role="admin"><ScheduleCalendar /></ProtectedRoute>} />
+          <Route path="/admin/equipment" element={<ProtectedRoute role="admin"><EquipmentManagement /></ProtectedRoute>} />
+          <Route path="/admin/maintenance" element={<ProtectedRoute role="admin"><Maintenance /></ProtectedRoute>} />
+          <Route path="/admin/manage-schedule" element={<ProtectedRoute role="admin"><ManageSchedule /></ProtectedRoute>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>
