@@ -2,6 +2,7 @@ import { Router } from 'express';
 import {
   cancelBooking,
   createBooking,
+  generateBookingsSchedule,
   getBooking,
   listBookings,
   listMyBookings,
@@ -13,6 +14,7 @@ const router = Router();
 
 router.use(requireAuth);
 router.post('/', createBooking);
+router.post('/schedule/generate', requireRole('admin'), generateBookingsSchedule);
 router.get('/my', listMyBookings);
 router.get('/', requireRole('admin'), listBookings);
 router.get('/:id', getBooking);

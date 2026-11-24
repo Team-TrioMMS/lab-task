@@ -15,15 +15,20 @@ export function AuthProvider({ children }) {
 
   async function login(credentials) {
     const result = await api.login(credentials);
+    if (result.token) localStorage.setItem("labbook_token", result.token);
     setUser(result.user || result);
     return result;
   }
   async function register(details) {
     const result = await api.register(details);
+    if (result.token) localStorage.setItem("labbook_token", result.token);
     setUser(result.user || result);
     return result;
   }
-  function logout() { setUser(null); }
+  function logout() {
+    localStorage.removeItem("labbook_token");
+    setUser(null);
+  }
 
   return <AuthContext.Provider value={{ user, login, register, logout }}>{children}</AuthContext.Provider>;
 }

@@ -10,7 +10,10 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   async function submit(e) {
     e.preventDefault(); setError(""); setLoading(true);
-    try { await login(form); navigate("/dashboard"); }
+    try {
+      const result = await login(form);
+      navigate(result.user?.role === "admin" ? "/admin" : "/dashboard");
+    }
     catch (err) { setError(err.message); }
     finally { setLoading(false); }
   }

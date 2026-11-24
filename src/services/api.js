@@ -15,13 +15,67 @@ function write(key, value) {
   localStorage.setItem(key, JSON.stringify(value));
 }
 async function request(path, options = {}) {
+  const token = localStorage.getItem("labbook_token");
   const response = await fetch(`${API_BASE}${path}`, {
     ...options,
-    headers: { "Content-Type": "application/json", ...(options.headers || {}) }
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(options.headers || {})
+    }
   });
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data.message || "Request failed");
+  if (!response.ok) throw new Error(data.message || data.error || "Request failed");
   return data;
+}
+
+function dateValue(value) {
+  if (!value) return "";
+  if (value instanceof Date) return value.toISOString().slice(0, 10);
+  return String(value).slice(0, 10);
+}
+
+function timeValue(value) {
+  if (!value) return "";
+  if (value instanceof Date) return value.toISOString().slice(11, 16);
+  return String(value).slice(0, 5);
+}
+
+function displayStatus(value) {
+  return value
+    ? value.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase())
+    : "Pending";
+}
+
+function dateTimeTime(value) {
+  if (value instanceof Date) return value.toISOString().slice(11, 16);
+  return String(value).replace("T", " ").slice(11, 16);
+}
+
+function normalizeBooking(booking) {
+  const scheduledStart = booking.scheduled_start || booking.scheduledStart;
+  const scheduledEnd = booking.scheduled_end || booking.scheduledEnd;
+  const scheduledDate = scheduledStart ? dateValue(scheduledStart) : "";
+  const scheduledTime = scheduledStart ? dateTimeTime(scheduledStart) : "";
+  return {
+    ...booking,
+    userId: booking.user_id ?? booking.userId,
+    userName: booking.user_name ?? booking.userName,
+    equipmentId: booking.equipment_id ?? booking.equipmentId,
+    equipmentName: booking.equipment_name ?? booking.equipmentName,
+    date: scheduledDate || dateValue(booking.booking_date ?? booking.date ?? booking.bookingDate),
+    startTime: scheduledTime || timeValue(booking.start_time ?? booking.startTime),
+    scheduledStart: scheduledStart || null,
+    scheduledEnd: scheduledEnd || null,
+    durationMinutes: booking.duration_minutes ?? booking.durationMinutes,
+    deadline: dateValue(booking.deadline),
+    urgency: booking.urgency ? displayStatus(booking.urgency) : "Low",
+    status: displayStatus(booking.status)
+  };
+}
+
+function requireAdminApi() {
+  if (!API_BASE) throw new Error("Admin scheduling requires the backend API. Configure VITE_API_BASE_URL and sign in as an admin.");
 }
 
 export const api = {
@@ -43,18 +97,37 @@ export const api = {
   },
 
   async getEquipment() {
-    if (API_BASE) return request("/equipment");
+    if (API_BASE) {
+      const data = await request("/equipment");
+      return (data.equipment || data).map((equipment) => ({
+        ...equipment,
+        status: displayStatus(equipment.status)
+      }));
+    }
     return demoEquipment;
   },
 
   async getMyBookings(userId) {
-    if (API_BASE) return request("/bookings/my");
+    if (API_BASE) {
+      const data = await request("/bookings/my");
+      return (data.bookings || data).map(normalizeBooking);
+    }
     const bookings = read(KEYS.bookings, initialBookings);
     return bookings.filter((b) => !b.userId || b.userId === userId);
   },
 
   async createBooking(payload) {
-    if (API_BASE) return request("/bookings", { method: "POST", body: JSON.stringify(payload) });
+    if (API_BASE) {
+      const data = await request("/bookings", {
+        method: "POST",
+        body: JSON.stringify({
+          ...payload,
+          bookingDate: payload.bookingDate || payload.date,
+          urgency: payload.urgency?.toLowerCase()
+        })
+      });
+      return normalizeBooking(data.booking || data);
+    }
     const bookings = read(KEYS.bookings, initialBookings);
     const item = {
       ...payload,
@@ -68,10 +141,58 @@ export const api = {
   },
 
   async cancelBooking(id) {
-    if (API_BASE) return request(`/bookings/${id}/cancel`, { method: "PATCH" });
+    if (API_BASE) return request(`/bookings/${id}`, { method: "DELETE" });
     const bookings = read(KEYS.bookings, initialBookings);
     const updated = bookings.map((b) => b.id === id && b.status === "Pending" ? { ...b, status: "Cancelled" } : b);
     write(KEYS.bookings, updated);
     return { success: true };
+  },
+
+  async getAllBookings() {
+    requireAdminApi();
+    const data = await request("/bookings");
+    return (data.bookings || data).map(normalizeBooking);
+  },
+
+  async updateBookingStatus(id, status, details = {}) {
+    requireAdminApi();
+    const data = await request(`/bookings/${id}/status`, {
+      method: "PUT",
+      body: JSON.stringify({ status: status.toLowerCase(), ...details })
+    });
+    return data;
+  },
+
+  async generateSchedule() {
+    requireAdminApi();
+    return request("/bookings/schedule/generate", { method: "POST" });
+  },
+
+  async createEquipment(payload) {
+    requireAdminApi();
+    const data = await request("/equipment", { method: "POST", body: JSON.stringify(payload) });
+    return data.equipment;
+  },
+
+  async updateEquipment(id, payload) {
+    requireAdminApi();
+    const data = await request(`/equipment/${id}`, { method: "PATCH", body: JSON.stringify(payload) });
+    return { ...data.equipment, status: displayStatus(data.equipment.status) };
+  },
+
+  async getMaintenance() {
+    requireAdminApi();
+    const data = await request("/maintenance");
+    return data.maintenance || [];
+  },
+
+  async createMaintenance(payload) {
+    requireAdminApi();
+    return request("/maintenance", { method: "POST", body: JSON.stringify(payload) });
+  },
+
+  async completeMaintenance(id) {
+    requireAdminApi();
+    return request(`/maintenance/${id}`, { method: "PATCH", body: JSON.stringify({ status: "completed" }) });
   }
 };
